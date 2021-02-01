@@ -82,15 +82,18 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
                 .withListener(new MultiplePermissionsListener() {
                     @Override
                     public void onPermissionsChecked(MultiplePermissionsReport report) {
+                        Log.i(getClass().getName(),"onPermissionsChecked ====="+report.areAllPermissionsGranted());
                         smsObserver = new SmsObserver(MainActivity.this, MainActivity.this);
                         smsObserver.registerSMSObserver();
                     }
 
                     @Override
                     public void onPermissionRationaleShouldBeShown(List<PermissionRequest> permissions, PermissionToken token) {
-
+                        Log.i(getClass().getName(),"onPermissionRationaleShouldBeShown ====="+permissions.size());
                     }
                 }).check();
+//        Log.i(getClass().getName(),"registerSMSObserver =====开始注册");
+
         // 初始化线程池
         mThreadPool = Executors.newCachedThreadPool();
         initHandler();
@@ -268,14 +271,21 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
 
     private void disConnect(){
         try {
-            // 断开 客户端发送到服务器 的连接，即关闭输出流对象OutputStream
-            outputStream.close();
-            // 断开 服务器发送到客户端 的连接，即关闭输入流读取器对象BufferedReader
-            br.close();
-            // 最终关闭整个Socket连接
-            socket.close();
+            if(outputStream!=null){
+                // 断开 客户端发送到服务器 的连接，即关闭输出流对象OutputStream
+                outputStream.close();
+            }
+            if(br!=null){
+                // 断开 服务器发送到客户端 的连接，即关闭输入流读取器对象BufferedReader
+                br.close();
+            }
+            if(socket!=null){
+                // 最终关闭整个Socket连接
+                socket.close();
+            }
+
             // 判断客户端和服务器是否已经断开连接
-            System.out.println(socket.isConnected());
+//            System.out.println(socket.isConnected());
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -396,7 +406,9 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
         if(mDisposable!=null&&!mDisposable.isDisposed()){
             mDisposable.dispose();
         }
-        smsObserver.unregisterSMSObserver();
+        if(smsObserver!=null){
+            smsObserver.unregisterSMSObserver();
+        }
         disConnect();
         super.onDestroy();
     }
