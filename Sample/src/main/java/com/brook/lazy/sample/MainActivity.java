@@ -104,7 +104,7 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
         btnDeviceInfo.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if(socket.isConnected()){
+                if(socket!=null&&socket.isConnected()){
                     String registerInfo = deviceInfo().toString();
                     smsAdapter.setmSmsLists("注册设备:"+registerInfo);
                     mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
@@ -166,6 +166,7 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
     }
 
     private void connectSocket(){
+        disConnect();
         mThreadPool.execute(new Runnable() {
             @Override
             public void run() {
@@ -174,10 +175,15 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
 //                    http://47.75.166.206/
 //                    172.21.38.135
                     // 创建Socket对象 & 指定服务端的IP 及 端口号
-                    socket = new Socket("47.75.166.206", 9503);
+                    if(socket==null){
+                        socket = new Socket("47.75.166.206", 9503);
+                    }
                     // 判断客户端和服务器是否连接成功
-                    Log.i(TAG,"是否连接成功"+socket.isConnected());
-                    if(socket.isConnected()){
+                    if(socket!=null&&smsAdapter != null){
+                        Log.i(TAG,"是否连接成功"+socket.isConnected());
+//                        smsAdapter.setmSmsLists("是否连接成功:"+socket.isConnected());
+                    }
+                    if(socket!=null&&socket.isConnected()){
                         Message msg = Message.obtain();
                         msg.what = 1;
                         mMainHandler.sendMessage(msg);
@@ -263,6 +269,8 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
                     // 步骤3：发送数据到服务端
                     outputStream.flush();
                 } catch (IOException e) {
+                    disConnect();
+                    connectSocket();
                     e.printStackTrace();
                 }
             }
@@ -282,6 +290,7 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
             if(socket!=null){
                 // 最终关闭整个Socket连接
                 socket.close();
+                socket=null;
             }
 
             // 判断客户端和服务器是否已经断开连接
@@ -383,6 +392,7 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
                         if(socket!=null&&socket.isConnected()){
                             sendSocketMessage(sendPing().toString());
                         }else {
+                            smsAdapter.setmSmsLists("断开连接");
                             connectSocket();
                         }
                     }
