@@ -107,7 +107,7 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
                     mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
                     sendSocketMessage(registerInfo);
                 }else{
-                    initHandler();
+                    connectSocket();
                 }
             }
         });
@@ -145,7 +145,7 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
                         if(mDisposable!=null&&!mDisposable.isDisposed()){
                             mDisposable.dispose();
                         }
-                        interval(30);
+                        interval(50);
                         break;
                     case 3:
                         String readMsg = (String) msg.obj;
@@ -159,12 +159,19 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
         smsAdapter.setmSmsLists("====开始连接服务====");
         mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
         // 利用线程池直接开启一个线程 & 执行该线程
+        connectSocket();
+    }
+
+    private void connectSocket(){
         mThreadPool.execute(new Runnable() {
             @Override
             public void run() {
                 try {
+
+//                    http://47.75.166.206/
+//                    172.21.38.135
                     // 创建Socket对象 & 指定服务端的IP 及 端口号
-                    socket = new Socket("172.21.38.135", 9503);
+                    socket = new Socket("47.75.166.206", 9503);
                     // 判断客户端和服务器是否连接成功
                     Log.i(TAG,"是否连接成功"+socket.isConnected());
                     if(socket.isConnected()){
@@ -179,8 +186,8 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
                 }
             }
         });
-    }
 
+    }
     //接受服务器消息
     public void receievmessage(){
         try{
@@ -363,13 +370,17 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
                         String sendPing =sendPing().toString();
                         smsAdapter.setmSmsLists("每隔"+minutes+"秒检测心跳: "+sendPing);
                         mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
-                        sendSocketMessage(sendPing().toString());
+                        if(socket!=null&&socket.isConnected()){
+                            sendSocketMessage(sendPing().toString());
+                        }else {
+                            connectSocket();
+                        }
                     }
 
                     @Override
                     public void onError(@NonNull Throwable e) {
                         disConnect();
-                        initHandler();
+                        connectSocket();
                     }
 
                     @Override
