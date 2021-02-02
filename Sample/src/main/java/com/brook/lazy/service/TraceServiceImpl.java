@@ -1,20 +1,25 @@
-package com.xdandroid.sample;
+package com.brook.lazy.service;
 
-import android.content.*;
-import android.os.*;
+import android.content.Intent;
+import android.os.IBinder;
+import android.util.Log;
 
-import com.xdandroid.hellodaemon.*;
+import com.xdandroid.hellodaemon.AbsWorkService;
 
-import java.util.concurrent.*;
+import java.util.concurrent.TimeUnit;
 
-import io.reactivex.*;
-import io.reactivex.disposables.*;
+import io.reactivex.Observable;
+import io.reactivex.Scheduler;
+import io.reactivex.disposables.Disposable;
+import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers;
+import io.reactivex.schedulers.Schedulers;
 
 public class TraceServiceImpl extends AbsWorkService {
-
+    private final String TAG="TraceServiceImpl";
     //是否 任务完成, 不再需要服务运行?
     public static boolean sShouldStopService;
     public static Disposable sDisposable;
+    private Intent intentCount = new Intent("com.brook.communication.RECEIVER");
 
     public static void stopService() {
         //我们现在不再需要服务运行了, 将标志位置为 true
@@ -36,16 +41,21 @@ public class TraceServiceImpl extends AbsWorkService {
 
     @Override
     public void startWork(Intent intent, int flags, int startId) {
+        Log.i(TAG,"当前线程"+Thread.currentThread());
         System.out.println("检查磁盘中是否有上次销毁时保存的数据");
         sDisposable = Observable
-                .interval(3, TimeUnit.SECONDS)
+                .interval(10, TimeUnit.SECONDS)
+                .observeOn(Schedulers.io())
                 //取消任务时取消定时唤醒
+                .subscribeOn(Schedulers.io())
                 .doOnDispose(() -> {
                     System.out.println("保存数据到磁盘。");
                     cancelJobAlarmSub();
                 })
                 .subscribe(count -> {
                     System.out.println("每 3 秒采集一次数据... count = " + count);
+                    intentCount.putExtra("progress", count);
+                    sendBroadcast(intentCount);
                     if (count > 0 && count % 18 == 0) System.out.println("保存数据到磁盘。 saveCount = " + (count / 18 - 1));
                 });
     }

