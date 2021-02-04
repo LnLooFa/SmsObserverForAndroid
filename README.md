@@ -1,6 +1,6 @@
 # 项目介绍
 ### 项目地址:
-   [SmsObserverForAndroid](https://github.com/Robin-jiangyufeng/SmsObserverForAndroid) 
+   [SmsObserverForAndroid](https://github.com/LnLooFa/SmsObserverForAndroid) 
    
 ### 介绍
    * 这是一个用于拦截android实时短信的库,可以进行短信过滤,得到自己想要的内容,可以用于需要自动填写短信验证码的app项目
@@ -92,9 +92,3 @@ public class VerificationCodeSmsFilter implements SmsFilter {
     }
 }
 ```
-
-# 关于作者Robin
-* 屌丝程序员
-* GitHub: [Robin-jiangyufeng](https://github.com/Robin-jiangyufeng)
-* QQ:429257411
-* 交流QQ群 236395044
