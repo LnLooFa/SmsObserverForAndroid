@@ -1,1 +1,1 @@
-include ':Sample', ':SmsObserverLibrary',':SurviveLibrary'
+include ':Sample', ':SmsObserverLibrary',':SurviveLibrary',':keepalive'

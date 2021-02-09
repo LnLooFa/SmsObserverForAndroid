@@ -1,6 +1,5 @@
-package com.sdk.coolfar_sdk;
+package com.brook.lazy.service;
 
-import android.app.Service;
 import android.content.Intent;
 import android.os.Handler;
 import android.os.IBinder;
@@ -8,11 +7,21 @@ import android.os.Messenger;
 
 import com.sdk.keepbackground.work.AbsWorkService;
 
+import java.util.concurrent.TimeUnit;
+
+import io.reactivex.Observable;
+import io.reactivex.disposables.Disposable;
+import io.reactivex.schedulers.Schedulers;
+
 public class MyService extends AbsWorkService {
     public MyService() {
     }
 
     private boolean mIsRunning;
+
+    public static Disposable sDisposable;
+    private Intent intentCount = new Intent("com.brook.communication.MyService");
+
 
     @Override
     public Boolean needStartWorkService() {
@@ -29,13 +38,30 @@ public class MyService extends AbsWorkService {
     }
 
     private void doWork(){
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                // do something
-                mIsRunning=true;
-            }
-        }).start();
+//        new Thread(new Runnable() {
+//            @Override
+//            public void run() {
+//                // do something
+//                mIsRunning=true;
+//            }
+//        }).start();
+        sDisposable = Observable
+                .interval(55, TimeUnit.SECONDS)
+                .observeOn(Schedulers.io())
+                //取消任务时取消定时唤醒
+                .subscribeOn(Schedulers.io())
+                .doOnDispose(() -> {
+                    mIsRunning=false;
+                })
+                .subscribe(count -> {
+                    mIsRunning=true;
+//                    System.out.println("每 3 秒采集一次数据... count = " + count);
+                    intentCount.putExtra("progress", count);
+                    sendBroadcast(intentCount);
+//                    if (count > 0 && count % 18 == 0) System.out.println("保存数据到磁盘。 saveCount = " + (count / 18 - 1));
+                });
+
+
     }
     /**
      * 业务执行完成需要进行的操作
@@ -68,6 +94,8 @@ public class MyService extends AbsWorkService {
      */
     @Override
     public void onServiceKilled() {
-
+        if(sDisposable!=null){
+            sDisposable.dispose();
+        }
     }
 }

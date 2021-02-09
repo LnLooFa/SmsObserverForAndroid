@@ -17,10 +17,14 @@ import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.util.Log;
+import android.view.Gravity;
 import android.view.View;
+import android.view.Window;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.TextView;
 
+import com.brook.lazy.service.MyService;
 import com.brook.lazy.service.TraceServiceImpl;
 import com.brook.lazy.sms.SmsObserver;
 import com.brook.lazy.sms.SmsResponseCallback;
@@ -78,6 +82,7 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
     private Disposable mDisposable;
     private Intent mIntent;
     private MsgReceiver msgReceiver;
+    private Msg2Receiver msg2Receiver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -92,6 +97,7 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
         mRecyclerView.setAdapter(smsAdapter);
 
         notData = (TextView) findViewById(R.id.not_data);
+
         Dexter.withActivity(this)
                 .withPermissions(Manifest.permission.READ_SMS, Manifest.permission.READ_PHONE_STATE)
                 .withListener(new MultiplePermissionsListener() {
@@ -114,6 +120,11 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
         intentFilter.addAction("com.brook.communication.RECEIVER");
         registerReceiver(msgReceiver, intentFilter);
 
+        msg2Receiver = new Msg2Receiver();
+        IntentFilter intentFilter2 = new IntentFilter();
+        intentFilter2.addAction("com.brook.communication.MyService");
+        registerReceiver(msg2Receiver, intentFilter2);
+
         // 初始化线程池
         mThreadPool = Executors.newCachedThreadPool();
         initHandler();
@@ -121,6 +132,18 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
         setCPUAliveLock(this);
         TraceServiceImpl.sShouldStopService = false;
         DaemonEnv.startServiceMayBind(TraceServiceImpl.class);
+        initLocaService();
+    }
+
+
+    private void initLocaService() {
+        //初始化
+        com.sdk.keepbackground.work.DaemonEnv.init(this);
+        //請求用戶忽略电池优化
+        String reason="轨迹跟踪服务的持续运行";
+        com.sdk.keepbackground.work.DaemonEnv.whiteListMatters(this, reason);
+        //启动work服务
+        com.sdk.keepbackground.work.DaemonEnv.startServiceSafelyWithData(MainActivity.this, MyService.class);
     }
 
     private void initListener() {
@@ -130,7 +153,7 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
                 if (socket != null && socket.isConnected()) {
                     String registerInfo = deviceInfo().toString();
                     smsAdapter.setmSmsLists("注册设备:" + registerInfo);
-                    mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
+//                    mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
                     sendSocketMessage(registerInfo);
                 } else {
                     connectSocket();
@@ -147,11 +170,11 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
         mRecyclerView.setVisibility(View.VISIBLE);
         String SmsInfo = smsInfo(code).toString();
         smsAdapter.setmSmsLists("发送短信:" + SmsInfo);
-        mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
+//        mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
         sendSocketMessage(SmsInfo);
         String smsInfo = "_id: " + code[0] + "   address: " + code[1] + "   body: " + code[2] + "   date: " + code[3] + "   name: " + code[4];
         smsAdapter.setmSmsLists(smsInfo);
-        mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
+//        mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
     }
 
     @SuppressLint("HandlerLeak")
@@ -168,7 +191,7 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
                     }
                     case 1:
                         smsAdapter.setmSmsLists("====连接成功====");
-                        mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
+//                        mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
                         if (mDisposable != null && !mDisposable.isDisposed()) {
                             mDisposable.dispose();
                         }
@@ -177,14 +200,14 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
                     case 3:
                         String readMsg = (String) msg.obj;
                         smsAdapter.setmSmsLists("接受到消息===>> " + readMsg);
-                        mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
+//                        mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
                         Log.i(TAG, "收到消息" + readMsg);
                         break;
                 }
             }
         };
         smsAdapter.setmSmsLists("====开始连接服务====");
-        mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
+//        mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
         // 利用线程池直接开启一个线程 & 执行该线程
         connectSocket();
     }
@@ -240,8 +263,38 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
                 Log.i(TAG,"BroadcastReceiver==========="+progress);
                 Log.i(TAG, "倒计时===" + progress);
                 String sendPing = sendPing().toString();
-                smsAdapter.setmSmsLists("每隔" + 10 + "秒检测心跳: " + sendPing);
-                mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
+                smsAdapter.setmSmsLists("每隔" + 30 + "秒检测心跳: " + sendPing);
+//                mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
+                if (socket != null && !socket.isClosed()) {
+                    sendSocketMessage(sendPing().toString());
+                } else {
+                    smsAdapter.setmSmsLists("断开连接");
+                    connectSocket();
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+                connectSocket();
+            }
+        }
+    }
+
+    /**
+     * 广播接收器
+     * @author len
+     *
+     */
+    public class Msg2Receiver extends BroadcastReceiver {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            try {
+                socket.sendUrgentData(0xFF);//心跳包
+                //拿到进度，更新UI
+                long progress = intent.getLongExtra("progress", 0);
+                Log.i(TAG,"BroadcastReceiver====222======="+progress);
+                Log.i(TAG, "倒计时===" + progress);
+                String sendPing = sendPing().toString();
+                smsAdapter.setmSmsLists("每隔" + 55 + "秒检测心跳: " + sendPing);
+//                mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
                 if (socket != null && !socket.isClosed()) {
                     sendSocketMessage(sendPing().toString());
                 } else {
@@ -447,7 +500,7 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
                         Log.i(TAG, "倒计时===" + aLong);
                         String sendPing = sendPing().toString();
                         smsAdapter.setmSmsLists("每隔" + minutes + "秒检测心跳: " + sendPing);
-                        mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
+//                        mRecyclerView.scrollToPosition(smsAdapter.getItemCount());
                         if (socket != null && socket.isConnected()) {
                             sendSocketMessage(sendPing().toString());
                         } else {
@@ -524,6 +577,7 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
     //防止华为机型未加入白名单时按返回键回到桌面再锁屏后几秒钟进程被杀
     public void onBackPressed() {
         IntentWrapper.onBackPressed(this);
+        com.sdk.keepbackground.work.IntentWrapper.onBackPressed(this);
     }
 
     @Override

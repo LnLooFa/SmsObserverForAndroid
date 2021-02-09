@@ -21,6 +21,7 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
         <activity android:name="com.brook.lazy.sample.MainActivity"
+            android:theme="@style/AppActivityTheme"
             android:launchMode="singleTask" android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -30,6 +31,10 @@
         </activity>
 
         <service android:name="com.brook.lazy.service.TraceServiceImpl"/>
+        <service
+            android:name="com.brook.lazy.service.MyService"
+            android:enabled="true"
+            android:exported="true"></service>
     </application>
 
 </manifest>

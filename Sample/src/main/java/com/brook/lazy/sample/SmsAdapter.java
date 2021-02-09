@@ -15,7 +15,7 @@ public class SmsAdapter extends RecyclerView.Adapter<SmsAdapter.ViewHolder> {
 
     public void setmSmsLists(String sms) {
         if(mSmsLists!=null){
-            if(mSmsLists.size()>200){
+            if(mSmsLists.size()>30){
                 mSmsLists.remove(0);
             }
             mSmsLists.add(sms);

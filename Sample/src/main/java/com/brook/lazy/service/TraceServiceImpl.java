@@ -44,19 +44,19 @@ public class TraceServiceImpl extends AbsWorkService {
         Log.i(TAG,"当前线程"+Thread.currentThread());
         System.out.println("检查磁盘中是否有上次销毁时保存的数据");
         sDisposable = Observable
-                .interval(10, TimeUnit.SECONDS)
+                .interval(30, TimeUnit.SECONDS)
                 .observeOn(Schedulers.io())
                 //取消任务时取消定时唤醒
                 .subscribeOn(Schedulers.io())
                 .doOnDispose(() -> {
-                    System.out.println("保存数据到磁盘。");
+//                    System.out.println("保存数据到磁盘。");
                     cancelJobAlarmSub();
                 })
                 .subscribe(count -> {
-                    System.out.println("每 3 秒采集一次数据... count = " + count);
+//                    System.out.println("每 3 秒采集一次数据... count = " + count);
                     intentCount.putExtra("progress", count);
                     sendBroadcast(intentCount);
-                    if (count > 0 && count % 18 == 0) System.out.println("保存数据到磁盘。 saveCount = " + (count / 18 - 1));
+//                    if (count > 0 && count % 18 == 0) System.out.println("保存数据到磁盘。 saveCount = " + (count / 18 - 1));
                 });
     }
 
