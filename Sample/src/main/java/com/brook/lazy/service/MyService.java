@@ -17,7 +17,7 @@ public class MyService extends AbsWorkService {
     public MyService() {
     }
 
-    private boolean mIsRunning;
+    public static boolean mIsRunning;
 
     public static Disposable sDisposable;
     private Intent intentCount = new Intent("com.brook.communication.MyService");
@@ -46,7 +46,7 @@ public class MyService extends AbsWorkService {
 //            }
 //        }).start();
         sDisposable = Observable
-                .interval(55, TimeUnit.SECONDS)
+                .interval(15, TimeUnit.SECONDS)
                 .observeOn(Schedulers.io())
                 //取消任务时取消定时唤醒
                 .subscribeOn(Schedulers.io())

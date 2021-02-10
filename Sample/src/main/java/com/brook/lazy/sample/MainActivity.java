@@ -129,7 +129,7 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
         mThreadPool = Executors.newCachedThreadPool();
         initHandler();
         initListener();
-        setCPUAliveLock(this);
+//        setCPUAliveLock(this);
         TraceServiceImpl.sShouldStopService = false;
         DaemonEnv.startServiceMayBind(TraceServiceImpl.class);
         initLocaService();
@@ -270,10 +270,12 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
                 } else {
                     smsAdapter.setmSmsLists("断开连接");
                     connectSocket();
+                    resetService(1);
                 }
             } catch (IOException e) {
                 e.printStackTrace();
                 connectSocket();
+                resetService(1);
             }
         }
     }
@@ -300,14 +302,29 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
                 } else {
                     smsAdapter.setmSmsLists("断开连接");
                     connectSocket();
+                    resetService(2);
                 }
             } catch (IOException e) {
                 e.printStackTrace();
                 connectSocket();
+                resetService(2);
             }
         }
     }
 
+    private void resetService(int resetType){
+        if(resetType==1){ //如果是1判断是否是2停止了,如果是2则判断是否是1停止了
+            if(!MyService.mIsRunning){ //Service1  停止了
+                initLocaService();
+            }
+        }else{
+            if(TraceServiceImpl.sShouldStopService){ //Service1  停止了
+                TraceServiceImpl.stopService();
+                TraceServiceImpl.sShouldStopService = false;
+                DaemonEnv.startServiceMayBind(TraceServiceImpl.class);
+            }
+        }
+    }
 
     //接受服务器消息
     public void receievmessage() {
@@ -585,14 +602,17 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
         if (mDisposable != null && !mDisposable.isDisposed()) {
             mDisposable.dispose();
         }
+        //注销广播
         if (smsObserver != null) {
             smsObserver.unregisterSMSObserver();
         }
-        disConnect();
-        releaseCPUAliveLock();
+        if(msg2Receiver!=null){
+            unregisterReceiver(msg2Receiver);
+        }
         TraceServiceImpl.stopService();
-        //注销广播
-        unregisterReceiver(msgReceiver);
+
+        disConnect();
+
         super.onDestroy();
     }
 
