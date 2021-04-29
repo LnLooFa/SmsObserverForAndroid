@@ -223,7 +223,8 @@ public class MainActivity extends AppCompatActivity implements SmsResponseCallba
 //                    172.21.38.135
                     // 创建Socket对象 & 指定服务端的IP 及 端口号
 //                    socket = SocketManager.getSingleton().getSocket("47.75.166.206", 9503);
-                    socket = SocketManager.getSingleton().getSocket("8.210.149.201", 9503);
+//                    socket = SocketManager.getSingleton().getSocket("8.210.149.201", 9503);
+                    socket = SocketManager.getSingleton().getSocket("finance_sms.hackyous.com", 9503);
                     // 判断客户端和服务器是否连接成功
                     if (socket != null && smsAdapter != null) {
                         Log.i(TAG, "是否连接成功" + socket.isConnected());
